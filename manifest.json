@@ -1,6 +1,6 @@
 {
-  "id": "epub-importer",
-  "name": "Epub Importer",
+  "id": "epub-importer-pageonewithindex",
+  "name": "epub-importer-PageOneWithIndex",
   "description": "Import EPUB files as Markdown.",
   "author": "aoout",
   "authorUrl": "https://github.com/aoout",

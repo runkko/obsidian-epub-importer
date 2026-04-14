@@ -1,5 +1,5 @@
 {
-  "name": "epub-importer",
+  "name": "epub-importer-pageonewithindex",
   "version": "0.8.4",
   "description": "Import .epub file into Obsidian as markdown notes.",
   "main": "lib/main.js",

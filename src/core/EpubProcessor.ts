@@ -9,6 +9,7 @@ import { create } from "./TurndownService";
 import * as path from "path";
 import { normalize } from "../utils/utils";
 import { templateWithVariables, tFrontmatter } from "../utils/obsidianUtils";
+import { Section } from "./parser/types";
 
 export default class EpubProcessor {
   private parser?: EpubParser;
@@ -48,12 +49,14 @@ export default class EpubProcessor {
   }
 
   private async processNotes(epubName: string, folderPath: string) {
+    if (this.settings.granularity === 0) {
+      await this.createFile(`${folderPath}/${epubName}.md`, this.generateSingleNoteContent());
+      return;
+    }
+
     this.mergeChapters(this.settings.granularity);
     const chapters = this.parser!.chapters.filter(c => c.level <= this.settings.granularity);
-
-    this.settings.granularity === 0
-      ? await this.createFile(`${folderPath}/${epubName}.md`, this.generateContent(chapters))
-      : await this.processChapters(epubName, folderPath, chapters);
+    await this.processChapters(epubName, folderPath, chapters);
   }
 
   private async processChapters(epubName: string, folderPath: string, chapters: Chapter[]) {
@@ -146,6 +149,155 @@ private hasHtmlElementWithId(html: string, id: string): boolean {
     return chapters
       .flatMap(c => c.sections.map(s => this.htmlToMD(s.html)))
       .join("\n\n");
+  }
+
+  private generateSingleNoteContent(): string {
+    const anchorMap = new Map<string, string>();
+    const chapterAnchors = new Map<Chapter, string>();
+    this.parser!.toc.forEach((chapter, index) =>
+      this.collectSingleNoteAnchors(chapter, anchorMap, chapterAnchors, `${index + 1}`)
+    );
+    const renderedChapters = this.parser!.toc
+      .map((chapter) => this.renderSingleNoteChapter(chapter, anchorMap, chapterAnchors))
+      .filter(Boolean);
+
+    return renderedChapters.join("\n\n");
+  }
+
+  private renderSingleNoteChapter(
+    chapter: Chapter,
+    anchorMap: Map<string, string>,
+    chapterAnchors: Map<Chapter, string>
+  ): string {
+    const headingText = chapterAnchors.get(chapter) ?? chapter.originalName;
+    const headingLevel = Math.min(chapter.level + 1, 6);
+    const heading = `${"#".repeat(headingLevel)} ${headingText}`;
+    const body = this.renderSingleNoteBody(chapter, anchorMap);
+    const children = chapter.subItems
+      .map((child) => this.renderSingleNoteChapter(child, anchorMap, chapterAnchors))
+      .filter(Boolean);
+
+    return [heading, body, ...children].filter(part => part.trim().length > 0).join("\n\n");
+  }
+
+  private collectSingleNoteAnchors(
+    chapter: Chapter,
+    anchorMap: Map<string, string>,
+    chapterAnchors: Map<Chapter, string>,
+    orderKey: string,
+    parentHeadingPath = ""
+  ) {
+    const headingText = this.createSingleNoteHeadingText(chapter, orderKey);
+    const headingPath = parentHeadingPath ? `${parentHeadingPath}#${headingText}` : headingText;
+    chapterAnchors.set(chapter, headingText);
+    this.mapChapterAnchors(chapter, headingPath, anchorMap);
+
+    chapter.subItems.forEach((child, index) =>
+      this.collectSingleNoteAnchors(child, anchorMap, chapterAnchors, `${orderKey}.${index + 1}`, headingPath)
+    );
+  }
+
+  private renderSingleNoteBody(chapter: Chapter, anchorMap: Map<string, string>): string {
+    return chapter.sections
+      .map(section => this.renderSingleNoteSection(section, chapter.level, anchorMap))
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  private renderSingleNoteSection(section: Section, chapterLevel: number, anchorMap: Map<string, string>): string {
+    const rewritten = this.rewriteSingleNoteLinks(this.htmlToMD(section.html), anchorMap, section.urlPath);
+    return this.stripLeadingHeadings(rewritten, chapterLevel + 1);
+  }
+
+  private mapChapterAnchors(chapter: Chapter, headingPath: string, anchorMap: Map<string, string>) {
+    chapter.sections.forEach(section => {
+      const baseKey = this.getSingleNoteKey(section.urlPath);
+      const sectionKey = this.getSingleNoteKey(section.urlPath, section.urlHref);
+
+      if (!anchorMap.has(baseKey)) anchorMap.set(baseKey, headingPath);
+      anchorMap.set(sectionKey, headingPath);
+
+      this.extractHtmlIds(section.html).forEach(id => {
+        const idKey = this.getSingleNoteKey(section.urlPath, id);
+        if (!anchorMap.has(idKey)) anchorMap.set(idKey, headingPath);
+      });
+    });
+  }
+
+  private createSingleNoteHeadingText(chapter: Chapter, orderKey: string): string {
+    return `${orderKey} ${chapter.originalName}`.trim();
+  }
+
+  private rewriteSingleNoteLinks(content: string, anchorMap: Map<string, string>, currentUrlPath: string): string {
+    return content.replace(/\[\[([^\]]+)\]\]/g, (match, linkText) => {
+      const separatorIndex = linkText.indexOf("|");
+      const target = separatorIndex >= 0 ? linkText.slice(0, separatorIndex) : linkText;
+      const display = separatorIndex >= 0 ? linkText.slice(separatorIndex + 1) : linkText;
+      const anchor = this.resolveSingleNoteAnchor(target, anchorMap, currentUrlPath);
+
+      return anchor ? `[[#${anchor}|${display}]]` : match;
+    });
+  }
+
+  private resolveSingleNoteAnchor(target: string, anchorMap: Map<string, string>, currentUrlPath: string): string | null {
+    const key = this.resolveSingleNoteKey(target, currentUrlPath);
+    if (anchorMap.has(key)) return anchorMap.get(key)!;
+
+    const [targetPath] = target.split("#");
+    if (targetPath) {
+      const baseKey = this.resolveSingleNoteKey(targetPath, currentUrlPath);
+      if (anchorMap.has(baseKey)) return anchorMap.get(baseKey)!;
+    }
+
+    return null;
+  }
+
+  private resolveSingleNoteKey(target: string, currentUrlPath: string): string {
+    const [rawPath, rawHref = ""] = target.split("#");
+    if (!rawPath) return this.getSingleNoteKey(currentUrlPath, rawHref);
+
+    const absolutePath = path.resolve(path.dirname(currentUrlPath), decodeURIComponent(rawPath));
+    return this.getSingleNoteKey(absolutePath, rawHref);
+  }
+
+  private getSingleNoteKey(urlPath: string, href = ""): string {
+    const relativePath = path.relative(this.parser!.tmpPath, urlPath).replace(/\\/g, "/");
+    const decodedPath = decodeURIComponent(relativePath);
+    const decodedHref = decodeURIComponent(href);
+    return decodedHref ? `${decodedPath}#${decodedHref}` : decodedPath;
+  }
+
+  private extractHtmlIds(html: string): string[] {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    return Array.from(doc.querySelectorAll("[id]"))
+      .map(element => element.getAttribute("id") ?? "")
+      .filter(Boolean);
+  }
+
+  private stripLeadingHeadings(content: string, maxDepthToStrip: number): string {
+    const lines = content.split("\n");
+    let index = 0;
+
+    while (index < lines.length && lines[index].trim() === "") index++;
+
+    while (
+      index < lines.length &&
+      this.isHeadingLine(lines[index]) &&
+      this.getHeadingDepth(lines[index]) <= maxDepthToStrip
+    ) {
+      index++;
+      while (index < lines.length && lines[index].trim() === "") index++;
+    }
+
+    return lines.slice(index).join("\n").trim();
+  }
+
+  private isHeadingLine(line: string): boolean {
+    return /^\s*#{1,6}\s+/.test(line);
+  }
+
+  private getHeadingDepth(line: string): number {
+    return (line.match(/^\s*(#{1,6})\s+/)?.[1].length) ?? 0;
   }
 
   private mergeChapters(maxLevel = 0) {

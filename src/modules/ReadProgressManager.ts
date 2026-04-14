@@ -10,7 +10,7 @@ type scrollPositionDB = { [filePath: string]: EphemeralState };
 export class ReadProgressManager {
 	private app: App;
 	private db: scrollPositionDB = {};
-	private dbFileName = ".obsidian/plugins/epub-importer/progress.json";
+	private dbFileName = ".obsidian/plugins/epub-importer-pageonewithindex/progress.json";
 	private delayAfterFileOpening = 30;
 	private lastSavedDb: scrollPositionDB = {};
 
