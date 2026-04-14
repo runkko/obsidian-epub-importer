@@ -199,14 +199,14 @@ private hasHtmlElementWithId(html: string, id: string): boolean {
 
   private renderSingleNoteBody(chapter: Chapter, anchorMap: Map<string, string>): string {
     return chapter.sections
-      .map(section => this.renderSingleNoteSection(section, chapter.level, anchorMap))
+      .map(section => this.renderSingleNoteSection(section, chapter, anchorMap))
       .filter(Boolean)
       .join("\n\n");
   }
 
-  private renderSingleNoteSection(section: Section, chapterLevel: number, anchorMap: Map<string, string>): string {
+  private renderSingleNoteSection(section: Section, chapter: Chapter, anchorMap: Map<string, string>): string {
     const rewritten = this.rewriteSingleNoteLinks(this.htmlToMD(section.html), anchorMap, section.urlPath);
-    return this.stripLeadingHeadings(rewritten, chapterLevel + 1);
+    return this.stripLeadingHeadings(rewritten, chapter.level + 1, chapter.originalName);
   }
 
   private mapChapterAnchors(chapter: Chapter, headingPath: string, anchorMap: Map<string, string>) {
@@ -225,7 +225,22 @@ private hasHtmlElementWithId(html: string, id: string): boolean {
   }
 
   private createSingleNoteHeadingText(chapter: Chapter, orderKey: string): string {
-    return `${orderKey} ${chapter.originalName}`.trim();
+    const title = chapter.originalName.trim();
+    return this.hasExistingChapterNumber(title) ? title : `${orderKey} ${title}`.trim();
+  }
+
+  private hasExistingChapterNumber(title: string): boolean {
+    const normalizedTitle = title.trim();
+
+    const numberedPatterns = [
+      /^\d+(?:[.\-]\d+)*(?=[^\d\s])/,
+      /^\d+(?:[.\-]\d+)*[)\].、:：\-—_\s]+/,
+      /^(?:chapter|part|section|book|vol(?:ume)?)\s+\d+/i,
+      /^(?:[ivxlcdm]+)[)\].、:：\-—_\s]+/i,
+      /^第[\d一二三四五六七八九十百千万两零〇○壹贰叁肆伍陆柒捌玖拾佰仟]+[章节回卷部篇册集讲节]/,
+    ];
+
+    return numberedPatterns.some((pattern) => pattern.test(normalizedTitle));
   }
 
   private rewriteSingleNoteLinks(content: string, anchorMap: Map<string, string>, currentUrlPath: string): string {
@@ -274,9 +289,10 @@ private hasHtmlElementWithId(html: string, id: string): boolean {
       .filter(Boolean);
   }
 
-  private stripLeadingHeadings(content: string, maxDepthToStrip: number): string {
+  private stripLeadingHeadings(content: string, maxDepthToStrip: number, chapterTitle: string): string {
     const lines = content.split("\n");
     let index = 0;
+    const normalizedTitle = chapterTitle.trim();
 
     while (index < lines.length && lines[index].trim() === "") index++;
 
@@ -289,7 +305,19 @@ private hasHtmlElementWithId(html: string, id: string): boolean {
       while (index < lines.length && lines[index].trim() === "") index++;
     }
 
+    if (index < lines.length && this.isDuplicateTitleLine(lines[index], normalizedTitle)) {
+      index++;
+      while (index < lines.length && lines[index].trim() === "") index++;
+    }
+
     return lines.slice(index).join("\n").trim();
+  }
+
+  private isDuplicateTitleLine(line: string, chapterTitle: string): boolean {
+    const normalizedLine = line.trim();
+    if (!normalizedLine || !chapterTitle) return false;
+
+    return normalizedLine === chapterTitle || normalizedLine.replace(/\s+/g, "") === chapterTitle.replace(/\s+/g, "");
   }
 
   private isHeadingLine(line: string): boolean {
