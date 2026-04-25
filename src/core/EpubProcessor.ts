@@ -154,8 +154,8 @@ private hasHtmlElementWithId(html: string, id: string): boolean {
   private generateSingleNoteContent(): string {
     const anchorMap = new Map<string, string>();
     const chapterAnchors = new Map<Chapter, string>();
-    this.parser!.toc.forEach((chapter, index) =>
-      this.collectSingleNoteAnchors(chapter, anchorMap, chapterAnchors, `${index + 1}`)
+    this.parser!.toc.forEach((chapter) =>
+      this.collectSingleNoteAnchors(chapter, anchorMap, chapterAnchors)
     );
     const renderedChapters = this.parser!.toc
       .map((chapter) => this.renderSingleNoteChapter(chapter, anchorMap, chapterAnchors))
@@ -184,16 +184,15 @@ private hasHtmlElementWithId(html: string, id: string): boolean {
     chapter: Chapter,
     anchorMap: Map<string, string>,
     chapterAnchors: Map<Chapter, string>,
-    orderKey: string,
     parentHeadingPath = ""
   ) {
-    const headingText = this.createSingleNoteHeadingText(chapter, orderKey);
+    const headingText = this.createSingleNoteHeadingText(chapter);
     const headingPath = parentHeadingPath ? `${parentHeadingPath}#${headingText}` : headingText;
     chapterAnchors.set(chapter, headingText);
     this.mapChapterAnchors(chapter, headingPath, anchorMap);
 
-    chapter.subItems.forEach((child, index) =>
-      this.collectSingleNoteAnchors(child, anchorMap, chapterAnchors, `${orderKey}.${index + 1}`, headingPath)
+    chapter.subItems.forEach((child) =>
+      this.collectSingleNoteAnchors(child, anchorMap, chapterAnchors, headingPath)
     );
   }
 
@@ -224,9 +223,8 @@ private hasHtmlElementWithId(html: string, id: string): boolean {
     });
   }
 
-  private createSingleNoteHeadingText(chapter: Chapter, orderKey: string): string {
-    const title = chapter.originalName.trim();
-    return this.hasExistingChapterNumber(title) ? title : `${orderKey} ${title}`.trim();
+  private createSingleNoteHeadingText(chapter: Chapter): string {
+    return chapter.originalName.trim();
   }
 
   private hasExistingChapterNumber(title: string): boolean {
@@ -368,8 +366,22 @@ private hasHtmlElementWithId(html: string, id: string): boolean {
   }
 
   private parseProperties(): Record<string, unknown> {
-    const props = parseYaml(templateWithVariables(this.settings.mocPropertysTemplate, this.parser!.meta, true));
-    props.tags = [...(props.tags ?? []), this.settings.tag];
+    const props = parseYaml(
+      templateWithVariables(this.settings.mocPropertysTemplate, this.parser!.meta, true)
+    ) as Record<string, unknown>;
+    const templateTags = Array.isArray(props.tags)
+      ? props.tags
+      : typeof props.tags === "string" && props.tags.trim()
+        ? [props.tags]
+        : [];
+    const configuredTag = this.settings.tag.trim();
+    const tags = [...templateTags, ...(configuredTag ? [configuredTag] : [])]
+      .map((tag) => String(tag).trim())
+      .filter(Boolean);
+
+    if (tags.length) props.tags = tags;
+    else delete props.tags;
+
     return props;
   }
 

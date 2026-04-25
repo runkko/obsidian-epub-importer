@@ -19,7 +19,7 @@ export interface EpubImporterSettings {
 }
 
 export const DEFAULT_SETTINGS: EpubImporterSettings = {
-	tag: "book",
+	tag: "",
 	libraries: [],
 	byDrag: false,
 	savePath: "",
