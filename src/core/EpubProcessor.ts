@@ -224,7 +224,14 @@ private hasHtmlElementWithId(html: string, id: string): boolean {
   }
 
   private createSingleNoteHeadingText(chapter: Chapter): string {
-    return chapter.originalName.trim();
+    const title = chapter.originalName.trim();
+    const siblings = chapter.parent ? chapter.parent.subItems : this.parser!.toc;
+    const sameTitleSiblings = siblings.filter((item) => item.originalName.trim() === title);
+
+    if (sameTitleSiblings.length <= 1) return title;
+
+    const duplicateIndex = sameTitleSiblings.findIndex((item) => item === chapter) + 1;
+    return `${title} (${duplicateIndex})`;
   }
 
   private hasExistingChapterNumber(title: string): boolean {
